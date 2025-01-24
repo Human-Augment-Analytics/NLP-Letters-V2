@@ -1,0 +1,52 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Log files
+*.log
+logs/
+*.out
+
+# macOS specific
+.DS_Store
+
+# IDE / Editor settings
+.idea/
+.vscode/
+
+# Hugging Face Transformers cache / model files
+cached_dir/
+*.lock
+*.bin
+*.h5
+*.pt
+*.onnx
+*.ckpt
+
+# Training output directories
+checkpoint/
+runs/
+output/
+**/finetuned*/
+
+# Data
+data/
+
+# Misc
+.env
