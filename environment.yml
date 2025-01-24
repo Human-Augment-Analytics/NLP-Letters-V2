@@ -1,0 +1,22 @@
+name: nlp-letters
+channels:
+  - defaults
+dependencies:
+  - python=3.9
+  - pip=21.2.4
+  - transformers
+  - nltk
+  - numpy
+  - pandas
+  - pillow
+  - wordcloud
+  - matplotlib
+  - xgboost
+  - jupyter
+  - spacy
+  - datasets
+  - torchvision
+  - pytorch::pytorch
+  - torchaudio
+  - accelerate
+  - lime
