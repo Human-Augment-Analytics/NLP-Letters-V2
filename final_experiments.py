@@ -26,7 +26,12 @@ import functools
 import warnings
 import re
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    TrainingArguments,
+    Trainer,
+)
 import numpy as np
 import evaluate
 from datasets import load_metric
@@ -35,22 +40,22 @@ import torch
 
 
 warnings.filterwarnings("ignore")
-plt.style.use('ieee')
+plt.style.use("ieee")
 
 
 degender_pronouns = {
-    ' mr ': ' mx ',
-    ' mrs ': ' mx ',
-    ' ms ': ' mx ',
-    ' miss ': ' mx ',
-    ' mister ': ' mx ',
+    " mr ": " mx ",
+    " mrs ": " mx ",
+    " ms ": " mx ",
+    " miss ": " mx ",
+    " mister ": " mx ",
 }
 
 degender_nouns = {
-    ' man ': ' person ',
-    ' men ': ' persons ',
-    ' woman ': ' person ',
-    ' women ': ' persons ',
+    " man ": " person ",
+    " men ": " persons ",
+    " woman ": " person ",
+    " women ": " persons ",
     " man's ": " person's",
     " men's ": " person's",
     " woman's ": " person's",
@@ -65,18 +70,20 @@ degender_nouns = {
 # - Works on Google Colab - L4 due to RAM and GPU requirements
 # Runs out of resources on 16GB M1 Pro
 def train_distilbert(data_column):
-    metric = evaluate.load('f1')
+    metric = evaluate.load("f1")
 
     model_checkpoint = "distilbert-base-uncased"
     batch_size = 16
     task = "nlp-letters-{}-degendered-class-weighted".format(data_column)
     metric_name = "f1"
-#    data_column = "s1_s2"
+    #    data_column = "s1_s2"
     model_name = model_checkpoint.split("/")[-1]
     num_labels = 2
 
     tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, use_fast=True)
-    model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=num_labels)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_checkpoint, num_labels=num_labels
+    )
 
     class CustomTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False):
@@ -85,14 +92,18 @@ def train_distilbert(data_column):
             outputs = model(**inputs)
             logits = outputs.get("logits")
             # compute custom loss (suppose one has 2 labels with different weights)
-            loss_fct = nn.CrossEntropyLoss(weight=torch.tensor([8.0, 1.0], device=model.device))
-            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+            loss_fct = nn.CrossEntropyLoss(
+                weight=torch.tensor([8.0, 1.0], device=model.device)
+            )
+            loss = loss_fct(
+                logits.view(-1, self.model.config.num_labels), labels.view(-1)
+            )
             return (loss, outputs) if return_outputs else loss
 
     args = TrainingArguments(
         f"{model_name}-finetuned-{task}",
-        evaluation_strategy = "epoch",
-        save_strategy = "epoch",
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
         learning_rate=2e-5,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
@@ -122,7 +133,7 @@ def train_distilbert(data_column):
         train_dataset=encoded_dataset["train"],
         eval_dataset=encoded_dataset["test"],
         tokenizer=tokenizer,
-        compute_metrics=compute_metrics
+        compute_metrics=compute_metrics,
     )
 
     trainer.train()
@@ -130,44 +141,49 @@ def train_distilbert(data_column):
 
 
 def preprocess(df, data_column, preprocess_type):
-    if preprocess_type == 'none':
+    if preprocess_type == "none":
         return df
 
     D = degenderizer()
-    df[data_column] = df[data_column].apply(lambda x: D.degender(x) if len(x) > 5 else x)
+    df[data_column] = df[data_column].apply(
+        lambda x: D.degender(x) if len(x) > 5 else x
+    )
 
     for k, v in degender_pronouns.items():
-        df[data_column] = df[data_column].str.lower().replace(k,v)
+        df[data_column] = df[data_column].str.lower().replace(k, v)
 
-    if preprocess_type == 'all':
+    if preprocess_type == "all":
         for k, v in degender_nouns.items():
-            df[data_column] = df[data_column].str.lower().replace(k,v)
+            df[data_column] = df[data_column].str.lower().replace(k, v)
     return df
 
 
 def replace(df, data_column):
     D = degenderizer()
-    df[data_column] = df[data_column].apply(lambda x: D.degender(x) if len(x) > 5 else x)
+    df[data_column] = df[data_column].apply(
+        lambda x: D.degender(x) if len(x) > 5 else x
+    )
 
     for k, v in degender_map.items():
-        df[data_column] = df[data_column].str.replace(k,v)
+        df[data_column] = df[data_column].str.replace(k, v)
     return df
 
 
 def main(model, text_column, preprocess_type):
 
-    dataset_path = "data/charlotte_dataset_final.csv"
+    # dataset_path = "data/charlotte_dataset_final.csv"
+    dataset_path = "data/sentence_sets_trimmed.csv"
     random_state = 100
     save_path = "final_results"
     Path(save_path).mkdir(exist_ok=True)
-    label_column = "APPLICANT_GENDER"
-    labels = ['FEMALE','MALE']
+    label_column = "applicant_gender"
+    labels = ["female", "male"]
 
     # Load dataset
-    df = pd.read_csv(dataset_path, encoding='unicode_escape')
+    df = pd.read_csv(dataset_path, encoding="unicode_escape")
 
     # Preprocess
-    df.replace(to_replace=r'[^\w\s]', value='', regex=True, inplace=True)
+    df.replace(to_replace=r"[^\w\s]", value="", regex=True, inplace=True)
     df = preprocess(df, text_column, preprocess_type)
 
     if model == "distilbert":
@@ -175,11 +191,9 @@ def main(model, text_column, preprocess_type):
         # branch off since training pipeline is completely different
         return
 
-
     train, test = train_test_split(df, test_size=0.2, random_state=random_state)
     train_x = train[text_column]
     train_y = train[label_column]
-
 
     test_x = test[text_column]
     test_y = test[label_column]
@@ -192,36 +206,37 @@ def main(model, text_column, preprocess_type):
         best_parameters = {
             "kernel": "rbf",
             "C": 1,
-            "class_weight": {"FEMALE": 8, "MALE": 1},
+            "class_weight": {"female": 8, "male": 1},
         }
         clf = SVC(**best_parameters)
     if model == "rf":
         best_parameters = {
             "n_estimators": 10,
             "ccp_alpha": 0.001,
-            "class_weight": {"FEMALE": 8, "MALE": 1},
+            "class_weight": {"female": 8, "male": 1},
         }
         clf = RandomForestClassifier(**best_parameters)
-    clf.fit(
-        train_x_processed, train_y
-    )
+    clf.fit(train_x_processed, train_y)
     predicted = clf.predict(test_x_processed)
     f1 = f1_score(predicted, test_y, average="macro")
     accuracy = accuracy_score(predicted, test_y)
     mcc = matthews_corrcoef(predicted, test_y)
     balance_acc = balanced_accuracy_score(predicted, test_y)
-    print(f"model: {model}, dataset: {text_column}, Macro F1: {f1}, Accuracy: {accuracy}, MCC: {mcc}, Balanced Accuracy: {balance_acc}")
+    print(
+        f"model: {model}, dataset: {text_column}, Macro F1: {f1}, Accuracy: {accuracy}, MCC: {mcc}, Balanced Accuracy: {balance_acc}"
+    )
     print(classification_report(predicted, test_y, target_names=labels))
     from mpl_toolkits.axes_grid1 import make_axes_locatable
+
     def plot_confusion_matrix(cm, class_names):
 
         fig, ax = plt.subplots()
 
         fig, ax = plt.subplots()
         divider = make_axes_locatable(ax)
-        cax = divider.append_axes('right', size='5%', pad=0.05)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
         im = ax.imshow(cm)
-        fig.colorbar(im, cax=cax, orientation='vertical')
+        fig.colorbar(im, cax=cax, orientation="vertical")
 
         ax.set_xticks(np.arange(len(class_names)))
         ax.set_yticks(np.arange(len(class_names)))
@@ -232,17 +247,24 @@ def main(model, text_column, preprocess_type):
         ax.set_ylabel("True")
         ax.set_xlabel("Predicted")
 
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-                rotation_mode="anchor")
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
         for i in range(len(class_names)):
             for j in range(len(class_names)):
-                text = ax.text(j, i, f"{np.around(cm[i, j], decimals=2)}%",
-                            ha="center", va="center", color="k")
+                text = ax.text(
+                    j,
+                    i,
+                    f"{np.around(cm[i, j], decimals=2)}%",
+                    ha="center",
+                    va="center",
+                    color="k",
+                )
 
         ax.set_title(f"Confusion Matrix for {model}, column: {text_column}")
         fig.tight_layout()
-        plt.savefig(Path(save_path) / f"{model}_cm_{text_column}.png", bbox_inches="tight")
+        plt.savefig(
+            Path(save_path) / f"{model}_cm_{text_column}.png", bbox_inches="tight"
+        )
         plt.clf()
 
     cm = confusion_matrix(test_y, predicted, labels=clf.classes_).astype(np.int32)
@@ -251,11 +273,11 @@ def main(model, text_column, preprocess_type):
     plot_confusion_matrix(cm, clf.classes_)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description = 'Say hello')
-    parser.add_argument('-model', help='Model Type', default='rf')
-    parser.add_argument('-dataset', help='Data column', default='full_text')
-    parser.add_argument('-preprocessing', help='Preprocessing steps', default='replace')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Say hello")
+    parser.add_argument("-model", help="Model Type", default="rf")
+    parser.add_argument("-dataset", help="Data column", default="full_text")
+    parser.add_argument("-preprocessing", help="Preprocessing steps", default="replace")
 
     args = parser.parse_args()
 

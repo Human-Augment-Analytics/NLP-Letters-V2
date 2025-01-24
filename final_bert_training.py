@@ -7,46 +7,50 @@ Original file is located at
     https://colab.research.google.com/drive/1Czx1YuTpMqfjzDR3go48kvHSjSvZQFyr
 """
 
-! pip install datasets transformers accelerate evaluate degender-pronoun
+# ! pip install datasets transformers accelerate evaluate degender-pronoun
 
-from huggingface_hub import notebook_login
+# from huggingface_hub import notebook_login
 
-notebook_login()
+# notebook_login()
 
-!apt install git-lfs
+# ! apt install git-lfs
 
-from google.colab import drive
-drive.mount('/content/drive')
+# from google.colab import drive
+# drive.mount('/content/drive')
 
 from datasets import Dataset
 import pandas as pd
 from degender_pronoun import degenderizer
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    TrainingArguments,
+    Trainer,
+)
 import numpy as np
 import evaluate
 from datasets import load_metric
 from torch import nn
-import torch
+
+# import torch
 from sklearn.metrics import classification_report
 from sklearn.metrics import matthews_corrcoef
 from sklearn.metrics import balanced_accuracy_score
 
 
-
-
 degender_pronouns = {
-    ' mr ': ' mx ',
-    ' mrs ': ' mx ',
-    ' ms ': ' mx ',
-    ' miss ': ' mx ',
-    ' mister ': ' mx ',
+    " mr ": " mx ",
+    " mrs ": " mx ",
+    " ms ": " mx ",
+    " miss ": " mx ",
+    " mister ": " mx ",
 }
 
 degender_nouns = {
-    ' man ': ' person ',
-    ' men ': ' persons ',
-    ' woman ': ' person ',
-    ' women ': ' persons ',
+    " man ": " person ",
+    " men ": " persons ",
+    " woman ": " person ",
+    " women ": " persons ",
     " man's ": " person's",
     " men's ": " person's",
     " woman's ": " person's",
@@ -57,19 +61,22 @@ degender_nouns = {
     " lady's ": " person's ",
 }
 
+
 def preprocess(df, data_column, preprocess_type):
-    if preprocess_type == 'none':
+    if preprocess_type == "none":
         return df
 
     D = degenderizer()
-    df[data_column] = df[data_column].apply(lambda x: D.degender(x) if len(x) > 5 else x)
+    df[data_column] = df[data_column].apply(
+        lambda x: D.degender(x) if len(x) > 5 else x
+    )
 
     for k, v in degender_pronouns.items():
-        df[data_column] = df[data_column].str.lower().replace(k,v)
+        df[data_column] = df[data_column].str.lower().replace(k, v)
 
-    if preprocess_type == 'all':
+    if preprocess_type == "all":
         for k, v in degender_nouns.items():
-            df[data_column] = df[data_column].str.lower().replace(k,v)
+            df[data_column] = df[data_column].str.lower().replace(k, v)
     return df
 
 
@@ -84,46 +91,57 @@ class CustomTrainer(Trainer):
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
 
-metric = evaluate.load('f1')
 
-model_checkpoint = "distilbert-base-uncased"
-#model_checkpoint = "roberta-base"
+metric = evaluate.load("f1")
+
+# model_checkpoint = "distilbert-base-uncased"
+# model_checkpoint = "tomhosking/bert-base-uncased-debiased-nli"
+# model_checkpoint = "roberta-base"
+model_checkpoint = "keshavkumaresan/distilbert-base-uncased-debiased"
 batch_size = 16
 metric_name = "f1"
-data_column = 's1_s2'
-#preprocessing_type = 'none'
-#preprocessing_type = 'pronouns'
-preprocessing_type = 'all'
+data_column = "s1_s2"
+# preprocessing_type = 'none'
+# preprocessing_type = 'pronouns'
+preprocessing_type = "all"
 task = "nlp-letters-{}-{}-class-weighted".format(data_column, preprocessing_type)
-labels = ['female','male']
-
+labels = ["female", "male"]
 
 
 model_name = model_checkpoint.split("/")[-1]
 num_labels = 2
 
-dataset_path = "/content/drive/MyDrive/sentence_sets.csv"
-df = pd.read_csv(dataset_path, encoding='unicode_escape')
+# dataset_path = "/content/drive/MyDrive/sentence_sets.csv"
+dataset_path = "data/sentence_sets_trimmed.csv"
+df = pd.read_csv(dataset_path, encoding="unicode_escape")
 df = preprocess(df, data_column, preprocessing_type)
 
-dataset = Dataset.from_pandas(df).rename_column("APPLICANT_GENDER", "label").class_encode_column("label").train_test_split(test_size=0.2)
+dataset = (
+    Dataset.from_pandas(df)
+    .rename_column("applicant_gender", "label")
+    .class_encode_column("label")
+    .train_test_split(test_size=0.2)
+)
 
 tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, use_fast=True)
-model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=num_labels)
+model = AutoModelForSequenceClassification.from_pretrained(
+    model_checkpoint, num_labels=num_labels
+)
 
 # DistilBERT params
 args = TrainingArguments(
     f"{model_name}-finetuned-{task}",
-    evaluation_strategy = "epoch",
-    save_strategy = "epoch",
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
     learning_rate=2e-5,
     per_device_train_batch_size=batch_size,
     per_device_eval_batch_size=batch_size,
-    num_train_epochs=10,
+    # num_train_epochs=10,
+    num_train_epochs=2,
     weight_decay=0.01,
     load_best_model_at_end=True,
     metric_for_best_model=metric_name,
-    push_to_hub=True,
+    # push_to_hub=True,
 )
 
 # RoBERTA params
@@ -142,11 +160,13 @@ args = TrainingArguments(
 #     push_to_hub=True,
 # )
 
+
 def preprocess_function(sample):
     return tokenizer(sample[data_column], truncation=True, padding=True)
 
 
 confusion_metric = evaluate.load("confusion_matrix")
+
 
 def compute_metrics(eval_pred):
     x, y = eval_pred
@@ -157,6 +177,7 @@ def compute_metrics(eval_pred):
     print("Balanced Accuracy: {}".format(balanced_accuracy_score(y, preds)))
     return metric.compute(predictions=preds, references=y, average="macro")
 
+
 encoded_dataset = dataset.map(preprocess_function, batched=True)
 
 trainer = CustomTrainer(
@@ -165,11 +186,11 @@ trainer = CustomTrainer(
     train_dataset=encoded_dataset["train"],
     eval_dataset=encoded_dataset["test"],
     tokenizer=tokenizer,
-    compute_metrics=compute_metrics
+    compute_metrics=compute_metrics,
 )
 
 trainer.train()
 
 trainer.evaluate()
 
-trainer.push_to_hub()
+# trainer.push_to_hub()
