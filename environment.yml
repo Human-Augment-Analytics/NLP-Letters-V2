@@ -1,14 +1,17 @@
 name: nlp-letters
 channels:
   - defaults
+  - pytorch
+  - conda-forge
 dependencies:
   - python=3.9
   - pip=21.2.4
-  - transformers
   - scikit-learn
   - numpy
   - pandas
   - matplotlib
-  - datasets
   - pytorch::pytorch
-  - accelerate
+  - pip:
+      - transformers
+      - datasets
+      - accelerate
