@@ -44,6 +44,7 @@ checkpoint/
 runs/
 output/
 **/finetuned*/
+final_results
 
 # Data
 data/
