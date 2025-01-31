@@ -45,6 +45,7 @@ runs/
 output/
 **/finetuned*/
 final_results
+distilbert-base-uncased*
 
 # Data
 data/
