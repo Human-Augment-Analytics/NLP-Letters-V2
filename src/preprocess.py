@@ -43,23 +43,24 @@ class BasicDegenderizer(BaseEstimator, TransformerMixin):
         self.mapping = mapping
 
     def _replace_words(self, text):
-        """Replaces gendered words in a given text while preserving case."""
-        def replace_word(word):
-            # Use lower() for lookup regardless of original case
+        """Replaces gendered words while preserving case and punctuation."""
+        words = re.split(r"(\W+)", text)
+        new_words = []
+
+        for word in words:
             lookup_key = word.lower() if self.lowercase else word
             if lookup_key in self.mapping:
                 neutral = self.mapping[lookup_key]
-                # Preserve case: uppercase, title-case, or lower-case
                 if word.isupper():
-                    return neutral.upper()
+                    new_words.append(neutral.upper())
                 elif word.istitle():
-                    return neutral.capitalize()
+                    new_words.append(neutral.capitalize())
                 else:
-                    return neutral
-            return word
+                    new_words.append(neutral)
+            else:
+                new_words.append(word)
 
-        words = text.split()
-        return " ".join(replace_word(word) for word in words)
+        return "".join(new_words)
     
     
 class AdvancedDegenderizer(BaseEstimator, TransformerMixin):

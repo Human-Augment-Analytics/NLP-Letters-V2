@@ -1,0 +1,29 @@
+actor actor actress
+author author authoress
+bartender bartender barmaid
+businessperson businessman businesswoman
+chairperson chairman chairwoman
+child boy girl son daughter stepson stepdaughter
+children boys girls sons daughters
+congressperson congressman congresswoman
+craftsperson craftsman craftswoman
+dancer ballerina
+godparent godfather godmother
+grandchild grandson granddaughter
+grandparent grandfather grandmother
+host hostress
+humankind mankind
+individual gentleman lady
+landowner landlord landlady
+parent father mother stepfather stepmother
+people men women
+person man woman
+policeofficer policeman policewoman
+relative nephew niece
+relative uncle aunt
+salesperson salesman saleswoman
+server waiter waitress
+sibling brother sister stepbrother stepsister
+spokesperson spokesman spokeswoman
+spouse husband wife widower widow
+worker workman workwoman
