@@ -42,7 +42,7 @@ class BaseModel(ABC):
 
 
 # Define the DistilBERT classifier with extra flexibility
-class DistilBERTClassifier(BaseModel, nn.Module):
+class DistilBERTClassifier(BaseModel):
     def __init__(
         self,
         model_name="distilbert-base-uncased",
@@ -52,68 +52,76 @@ class DistilBERTClassifier(BaseModel, nn.Module):
         class_weights=None,
         pooling="cls",
     ):
-        nn.Module.__init__(self)
         # Load configuration and update with custom settings
         self.config = AutoConfig.from_pretrained(model_name)
         self.config.num_labels = num_labels
         self.config.pooling = pooling  # "cls" or "mean"
 
-        # Load tokenizer and transformer model
+        # Load tokenizer and initialize the inner transformer model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.transformer = AutoModel.from_pretrained(model_name, config=self.config)
-
-        # Pre-classifier: transform transformer output to hidden space
-        self.pre_classifier = nn.Linear(
-            self.config.hidden_size, self.config.hidden_size
+        self.model = self._DistilBERTClassifier(
+            model_name, self.config, dropout_rate, extra_layers, class_weights
         )
-        self.pre_classifier_act = nn.ReLU()
-        self.dropout = nn.Dropout(p=dropout_rate)
 
-        # Build extra dense layers if specified
-        if extra_layers is None:
-            extra_layers = []
-        self.extra_layers = nn.ModuleList()
-        in_features = self.config.hidden_size
-        for layer_size in extra_layers:
-            self.extra_layers.append(
-                nn.Sequential(
-                    nn.Linear(in_features, layer_size),
-                    nn.ReLU(),
-                    nn.Dropout(p=dropout_rate),
+    class _DistilBERTClassifier(nn.Module):
+        def __init__(
+            self, model_name, config, dropout_rate, extra_layers, class_weights
+        ):
+            super().__init__()
+            # Load the transformer model with configuration
+            self.transformer = AutoModel.from_pretrained(model_name, config=config)
+
+            # Pre-classifier: transform transformer output to hidden space
+            self.pre_classifier = nn.Linear(config.hidden_size, config.hidden_size)
+            self.pre_classifier_act = nn.ReLU()
+            self.dropout = nn.Dropout(p=dropout_rate)
+
+            # Build extra dense layers if specified
+            if extra_layers is None:
+                extra_layers = []
+            self.extra_layers = nn.ModuleList()
+            in_features = config.hidden_size
+            for layer_size in extra_layers:
+                self.extra_layers.append(
+                    nn.Sequential(
+                        nn.Linear(in_features, layer_size),
+                        nn.ReLU(),
+                        nn.Dropout(p=dropout_rate),
+                    )
                 )
+                in_features = layer_size
+
+            # Final classifier layer mapping to number of labels
+            self.classifier = nn.Linear(in_features, config.num_labels)
+
+            # Set up loss function with optional class weighting
+            if class_weights is not None:
+                self.loss_fn = nn.CrossEntropyLoss(
+                    weight=torch.tensor(class_weights, dtype=torch.float32)
+                )
+            else:
+                self.loss_fn = nn.CrossEntropyLoss()
+            self.pooling = config.pooling
+
+        def forward(self, input_ids, attention_mask, labels=None):
+            outputs = self.transformer(
+                input_ids=input_ids, attention_mask=attention_mask
             )
-            in_features = layer_size
-
-        # Final classifier layer mapping to number of labels
-        self.classifier = nn.Linear(in_features, num_labels)
-
-        # Set up loss function with optional class weighting
-        if class_weights is not None:
-            self.loss_fn = nn.CrossEntropyLoss(
-                weight=torch.tensor(class_weights, dtype=torch.float32)
-            )
-        else:
-            self.loss_fn = nn.CrossEntropyLoss()
-
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-
-    def forward(self, input_ids, attention_mask, labels=None):
-        outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
-        # Pooling: choose between using the [CLS] token or mean pooling
-        if self.config.pooling == "mean":
-            pooled = torch.mean(outputs.last_hidden_state, dim=1)
-        else:
-            pooled = outputs.last_hidden_state[:, 0, :]  # [CLS] token
-        x = self.pre_classifier(pooled)
-        x = self.pre_classifier_act(x)
-        x = self.dropout(x)
-        for layer in self.extra_layers:
-            x = layer(x)
-        logits = self.classifier(x)
-        loss = None
-        if labels is not None:
-            loss = self.loss_fn(logits, labels)
-        return {"loss": loss, "logits": logits}
+            # Pooling: choose between using the [CLS] token or mean pooling
+            if self.pooling == "mean":
+                pooled = torch.mean(outputs.last_hidden_state, dim=1)
+            else:
+                pooled = outputs.last_hidden_state[:, 0, :]  # [CLS] token
+            x = self.pre_classifier(pooled)
+            x = self.pre_classifier_act(x)
+            x = self.dropout(x)
+            for layer in self.extra_layers:
+                x = layer(x)
+            logits = self.classifier(x)
+            loss = None
+            if labels is not None:
+                loss = self.loss_fn(logits, labels)
+            return {"loss": loss, "logits": logits}
 
     def train(
         self,
@@ -149,7 +157,7 @@ class DistilBERTClassifier(BaseModel, nn.Module):
         )
 
         trainer = Trainer(
-            model=self,
+            model=self.model,
             args=training_args,
             train_dataset=dataset["train"],
             eval_dataset=dataset["test"],
@@ -160,7 +168,7 @@ class DistilBERTClassifier(BaseModel, nn.Module):
 
     def predict(self, X):
         """Return model predictions for input texts."""
-        self.eval()
+        self.model.eval()
         tokens = self.tokenizer(
             X,
             truncation=True,
@@ -168,9 +176,9 @@ class DistilBERTClassifier(BaseModel, nn.Module):
             max_length=512,
             return_tensors="pt",
         )
-        tokens = {k: v.to(self.transformer.device) for k, v in tokens.items()}
+        tokens = {k: v.to(self.model.transformer.device) for k, v in tokens.items()}
         with torch.no_grad():
-            outputs = self.forward(**tokens)
+            outputs = self.model(**tokens)
         preds = torch.argmax(outputs["logits"], dim=1)
         return preds.cpu().numpy()
 
@@ -185,12 +193,12 @@ class DistilBERTClassifier(BaseModel, nn.Module):
 
     def save(self, path):
         """Save the transformer model and tokenizer."""
-        self.transformer.save_pretrained(path)
+        self.model.transformer.save_pretrained(path)
         self.tokenizer.save_pretrained(path)
 
     def load(self, path):
         """Load the transformer model and tokenizer from a path."""
-        self.transformer = AutoModel.from_pretrained(path)
+        self.model.transformer = AutoModel.from_pretrained(path, config=self.config)
         self.tokenizer = AutoTokenizer.from_pretrained(path)
 
     def _tokenize(self, example):
