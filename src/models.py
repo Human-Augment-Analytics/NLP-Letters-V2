@@ -165,6 +165,7 @@ class DistilBERTClassifier(BaseModel):
             compute_metrics=self._compute_metrics,
         )
         trainer.train()
+        return trainer.evaluate()
 
     def predict(self, X):
         """Return model predictions for input texts."""
