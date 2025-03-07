@@ -1,3 +1,4 @@
+import time
 import torch
 import torch.nn as nn
 import numpy as np
@@ -131,7 +132,7 @@ class DistilBERTClassifier(BaseModel):
         batch_size=16,
         learning_rate=2e-5,
         weight_decay=0.01,
-        output_dir="./distilbert_classifier",
+        output_dir=None,
     ):
         """Train the model using Hugging Face's Trainer API."""
         # Create a Dataset from the input data
@@ -144,7 +145,7 @@ class DistilBERTClassifier(BaseModel):
 
         # Set up training arguments
         training_args = TrainingArguments(
-            output_dir=output_dir,
+            output_dir=output_dir or f"./{self.model_name}",
             evaluation_strategy="epoch",
             save_strategy="epoch",
             learning_rate=learning_rate,
@@ -187,32 +188,69 @@ class DistilBERTClassifier(BaseModel):
         """Evaluate the model on test data and return metrics."""
         preds = self.predict(X)
         acc = accuracy_score(y, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y, preds, average="macro"
-        )
+        precision, recall, f1, _ = precision_recall_fscore_support(y, preds, average="macro")
         return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
 
     def save(self, path):
-        """Save the transformer model and tokenizer."""
-        self.model.transformer.save_pretrained(path)
+        """Save the entire model and tokenizer."""
+        torch.save(self.model.state_dict(), f"{path}/model.pt")
         self.tokenizer.save_pretrained(path)
 
+
     def load(self, path):
-        """Load the transformer model and tokenizer from a path."""
-        self.model.transformer = AutoModel.from_pretrained(path, config=self.config)
+        """Load the entire model and tokenizer."""
+        self.model.load_state_dict(torch.load(f"{path}/model.pt"))
         self.tokenizer = AutoTokenizer.from_pretrained(path)
 
     def _tokenize(self, example):
         """Tokenize the input text."""
-        return self.tokenizer(
-            example["text"], truncation=True, padding="max_length", max_length=512
-        )
+        return self.tokenizer(example["text"], truncation=True, padding="max_length", max_length=512)
+
+    # def _compute_metrics(self, eval_pred):
+    #     logits, labels = eval_pred
+    #     preds = np.argmax(logits, axis=-1)
+    #     acc = accuracy_score(labels, preds)
+    #     precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
+    #     return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
 
     def _compute_metrics(self, eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
+
+        # Basic metrics
         acc = accuracy_score(labels, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            labels, preds, average="macro"
-        )
-        return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
+        precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
+
+        # Additional metrics
+        mcc = matthews_corrcoef(labels, preds)
+        bal_acc = balanced_accuracy_score(labels, preds)
+        kappa = cohen_kappa_score(labels, preds)
+        jaccard = jaccard_score(labels, preds, average="macro")
+        hamming = hamming_loss(labels, preds)
+
+        # Classification report and confusion matrix
+        cr = classification_report(labels, preds, output_dict=True)
+        cm = confusion_matrix(labels, preds)
+
+        # AUC-ROC and AUC-PR
+        try:
+            auc_roc = roc_auc_score(labels, preds, multi_class="ovr")
+            auc_pr = average_precision_score(labels, preds)
+        except ValueError:
+            auc_roc, auc_pr = None, None
+
+        return {
+            "accuracy": acc,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "mcc": mcc,
+            "balanced_accuracy": bal_acc,
+            "cohen_kappa": kappa,
+            "jaccard": jaccard,
+            "hamming_loss": hamming,
+            "auc_roc": auc_roc if auc_roc is not None else -1,
+            "auc_pr": auc_pr if auc_pr is not None else -1,
+            "confusion_matrix": cm.tolist(),
+            "classification_report": cr,
+    }
