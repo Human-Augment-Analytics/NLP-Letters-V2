@@ -66,13 +66,18 @@ class DistilBERTClassifier(BaseModel):
         self.config = AutoConfig.from_pretrained(model_name)
         self.config.num_labels = num_labels
         self.config.pooling = pooling  # "cls" or "mean"
+        self.config.extra_layers = self.extra_layers  # Add extra_layers to config
+        self.config.dropout_rate = self.dropout_rate  # Add dropout_rate to config
+        self.config.class_weights = (
+            self.class_weights.tolist() if isinstance(self.class_weights, torch.Tensor) else self.class_weights
+        )  # Add class_weights to config
 
         # Load tokenizer and initialize the inner transformer model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = self._DistilBERTClassifier(
             model_name, self.config, dropout_rate, self.extra_layers, class_weights
         )
-        self.trainer = None
+        self.trainer = None  # Will be initialized during training
 
     class _DistilBERTClassifier(nn.Module):
         def __init__(
@@ -208,15 +213,11 @@ class DistilBERTClassifier(BaseModel):
             dataset = Dataset.from_dict({"text": X, "labels": y})
             dataset = dataset.map(self._tokenize, batched=True)
             dataset = dataset.remove_columns(["text"])
-            results = self.trainer.evaluate(dataset)
-            return {k: v for k, v in results.items() if k != "eval_loss"}
+            predictions = self.trainer.predict(dataset)
+            return self._compute_metrics((predictions.predictions, predictions.label_ids))
         else:
             preds = self.predict(X)
-            acc = accuracy_score(y, preds)
-            precision, recall, f1, _ = precision_recall_fscore_support(
-                y, preds, average="macro"
-            )
-            return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
+            return self._compute_metrics((preds, y))
 
     def save(self, path):
         """Save the entire model, tokenizer, and configuration."""
