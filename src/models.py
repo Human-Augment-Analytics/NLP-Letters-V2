@@ -8,10 +8,22 @@ from transformers import (
     AutoModel,
     AutoTokenizer,
     Trainer,
-    TrainingArguments,
+    TrainingArguments
 )
 from datasets import Dataset
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_fscore_support,
+    matthews_corrcoef,
+    balanced_accuracy_score,
+    cohen_kappa_score,
+    jaccard_score,
+    hamming_loss,
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    average_precision_score
+)
 from abc import ABC, abstractmethod
 
 
