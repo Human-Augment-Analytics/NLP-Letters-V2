@@ -2,6 +2,7 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
+import json
 from transformers import (
     AutoConfig,
     AutoModel,
@@ -53,6 +54,14 @@ class DistilBERTClassifier(BaseModel):
         class_weights=None,
         pooling="cls",
     ):
+        # Store initialization parameters
+        self.model_name = model_name
+        self.num_labels = num_labels
+        self.extra_layers = extra_layers if extra_layers is not None else []
+        self.dropout_rate = dropout_rate
+        self.class_weights = class_weights
+        self.pooling = pooling
+
         # Load configuration and update with custom settings
         self.config = AutoConfig.from_pretrained(model_name)
         self.config.num_labels = num_labels
@@ -61,8 +70,9 @@ class DistilBERTClassifier(BaseModel):
         # Load tokenizer and initialize the inner transformer model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = self._DistilBERTClassifier(
-            model_name, self.config, dropout_rate, extra_layers, class_weights
+            model_name, self.config, dropout_rate, self.extra_layers, class_weights
         )
+        self.trainer = None
 
     class _DistilBERTClassifier(nn.Module):
         def __init__(
@@ -78,8 +88,6 @@ class DistilBERTClassifier(BaseModel):
             self.dropout = nn.Dropout(p=dropout_rate)
 
             # Build extra dense layers if specified
-            if extra_layers is None:
-                extra_layers = []
             self.extra_layers = nn.ModuleList()
             in_features = config.hidden_size
             for layer_size in extra_layers:
@@ -157,7 +165,7 @@ class DistilBERTClassifier(BaseModel):
             metric_for_best_model="f1",
         )
 
-        trainer = Trainer(
+        self.trainer = Trainer(
             model=self.model,
             args=training_args,
             train_dataset=dataset["train"],
@@ -165,53 +173,64 @@ class DistilBERTClassifier(BaseModel):
             tokenizer=self.tokenizer,
             compute_metrics=self._compute_metrics,
         )
-        trainer.train()
-        return trainer.evaluate()
+        self.trainer.train()
+        return self.trainer.evaluate()
 
     def predict(self, X):
         """Return model predictions for input texts."""
-        self.model.eval()
-        tokens = self.tokenizer(
-            X,
-            truncation=True,
-            padding="max_length",
-            max_length=512,
-            return_tensors="pt",
-        )
-        tokens = {k: v.to(self.model.transformer.device) for k, v in tokens.items()}
-        with torch.no_grad():
-            outputs = self.model(**tokens)
-        preds = torch.argmax(outputs["logits"], dim=1)
-        return preds.cpu().numpy()
+        if self.trainer:
+            # Use Trainer if available
+            dataset = Dataset.from_dict({"text": X})
+            dataset = dataset.map(self._tokenize, batched=True)
+            dataset = dataset.remove_columns(["text"])
+            predictions = self.trainer.predict(dataset)
+            return np.argmax(predictions.predictions, axis=-1)
+        else:
+            # Fallback to manual prediction
+            self.model.eval()
+            tokens = self.tokenizer(
+                X,
+                truncation=True,
+                padding="max_length",
+                max_length=512,
+                return_tensors="pt",
+            )
+            device = next(self.model.parameters()).device
+            tokens = {k: v.to(device) for k, v in tokens.items()}
+            with torch.no_grad():
+                outputs = self.model(**tokens)
+            preds = torch.argmax(outputs["logits"], dim=1)
+            return preds.cpu().numpy()
 
     def test(self, X, y):
         """Evaluate the model on test data and return metrics."""
-        preds = self.predict(X)
-        acc = accuracy_score(y, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(y, preds, average="macro")
-        return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
+        if self.trainer:
+            dataset = Dataset.from_dict({"text": X, "labels": y})
+            dataset = dataset.map(self._tokenize, batched=True)
+            dataset = dataset.remove_columns(["text"])
+            results = self.trainer.evaluate(dataset)
+            return {k: v for k, v in results.items() if k != "eval_loss"}
+        else:
+            preds = self.predict(X)
+            acc = accuracy_score(y, preds)
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                y, preds, average="macro"
+            )
+            return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
 
     def save(self, path):
-        """Save the entire model and tokenizer."""
-        torch.save(self.model.state_dict(), f"{path}/model.pt")
-        self.tokenizer.save_pretrained(path)
-
+        """Save the entire model, tokenizer, and configuration."""
+        pass
 
     def load(self, path):
-        """Load the entire model and tokenizer."""
-        self.model.load_state_dict(torch.load(f"{path}/model.pt"))
-        self.tokenizer = AutoTokenizer.from_pretrained(path)
+        """Load the entire model, tokenizer, and configuration."""
+        pass
 
     def _tokenize(self, example):
         """Tokenize the input text."""
-        return self.tokenizer(example["text"], truncation=True, padding="max_length", max_length=512)
-
-    # def _compute_metrics(self, eval_pred):
-    #     logits, labels = eval_pred
-    #     preds = np.argmax(logits, axis=-1)
-    #     acc = accuracy_score(labels, preds)
-    #     precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
-    #     return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
+        return self.tokenizer(
+            example["text"], truncation=True, padding="max_length", max_length=512
+        )
 
     def _compute_metrics(self, eval_pred):
         logits, labels = eval_pred
@@ -219,7 +238,9 @@ class DistilBERTClassifier(BaseModel):
 
         # Basic metrics
         acc = accuracy_score(labels, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            labels, preds, average="macro"
+        )
 
         # Additional metrics
         mcc = matthews_corrcoef(labels, preds)
@@ -253,4 +274,4 @@ class DistilBERTClassifier(BaseModel):
             "auc_pr": auc_pr if auc_pr is not None else -1,
             "confusion_matrix": cm.tolist(),
             "classification_report": cr,
-    }
+        }
