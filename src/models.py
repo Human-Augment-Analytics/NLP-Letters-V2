@@ -156,6 +156,8 @@ class DistilBERTClassifier(BaseModel):
         learning_rate=2e-5,
         weight_decay=0.01,
         output_dir=None,
+        logging_dir=None,
+        report_to=None,
     ):
         """Train the model using Hugging Face's Trainer API."""
         # Create a Dataset from the input data
@@ -168,7 +170,10 @@ class DistilBERTClassifier(BaseModel):
 
         # Set up training arguments
         training_args = TrainingArguments(
-            output_dir=output_dir or f"./{self.model_name}",
+            output_dir=output_dir,
+            logging_dir=logging_dir,
+            logging_strategy="steps",
+            logging_steps=10,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             learning_rate=learning_rate,
@@ -178,6 +183,7 @@ class DistilBERTClassifier(BaseModel):
             weight_decay=weight_decay,
             load_best_model_at_end=True,
             metric_for_best_model="f1",
+            report_to=report_to,
         )
 
         self.trainer = Trainer(
@@ -246,25 +252,29 @@ class DistilBERTClassifier(BaseModel):
     def _compute_metrics(self, eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
-
-        # Basic metrics
         acc = accuracy_score(labels, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            labels, preds, average="macro"
-        )
+        precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
 
-        # Additional metrics
+        per_class_metrics = {}
+        _precision, _recall, _f1, _ = precision_recall_fscore_support(labels, preds, average=None)
+        for i, label in enumerate(np.unique(labels)):
+            per_class_metrics[f"{label}_precision"] = _precision[i]
+            per_class_metrics[f"{label}_recall"] = _recall[i]
+            per_class_metrics[f"{label}_f1"] = _f1[i]
+
         mcc = matthews_corrcoef(labels, preds)
         bal_acc = balanced_accuracy_score(labels, preds)
         kappa = cohen_kappa_score(labels, preds)
         jaccard = jaccard_score(labels, preds, average="macro")
         hamming = hamming_loss(labels, preds)
-
-        # Classification report and confusion matrix
-        cr = classification_report(labels, preds, output_dict=True)
+        # cr = classification_report(labels, preds, output_dict=True)
         cm = confusion_matrix(labels, preds)
+        cm_dict = {
+            f"cm_{i}{j}": cm[i, j]
+            for i in range(cm.shape[0])
+            for j in range(cm.shape[1])
+        }
 
-        # AUC-ROC and AUC-PR
         try:
             auc_roc = roc_auc_score(labels, preds, multi_class="ovr")
             auc_pr = average_precision_score(labels, preds)
@@ -281,12 +291,12 @@ class DistilBERTClassifier(BaseModel):
             "cohen_kappa": kappa,
             "jaccard": jaccard,
             "hamming_loss": hamming,
-            "auc_roc": auc_roc if auc_roc is not None else -1,
-            "auc_pr": auc_pr if auc_pr is not None else -1,
-            "confusion_matrix": cm.tolist(),
-            "classification_report": cr,
-        }
-        
+            "auc_roc": auc_roc,
+            "auc_pr": auc_pr,
+            # "classification_report": cr,
+        } | per_class_metrics | cm_dict
+
+
 class RoBERTaClassifier(BaseModel):
     def __init__(
         self,
@@ -374,13 +384,18 @@ class RoBERTaClassifier(BaseModel):
         learning_rate=2e-5,
         weight_decay=0.01,
         output_dir=None,
+        logging_dir=None,
+        report_to=None,
     ):
         dataset = Dataset.from_dict({"text": X, "labels": y})
         dataset = dataset.map(self._tokenize, batched=True)
         dataset = dataset.remove_columns(["text"])
         dataset = dataset.train_test_split(test_size=0.2, seed=42)
         training_args = TrainingArguments(
-            output_dir=output_dir or f"./{self.model_name}",
+            output_dir=output_dir,
+            logging_dir=logging_dir,
+            logging_strategy="steps",
+            logging_steps=10,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             learning_rate=learning_rate,
@@ -390,6 +405,7 @@ class RoBERTaClassifier(BaseModel):
             weight_decay=weight_decay,
             load_best_model_at_end=True,
             metric_for_best_model="f1",
+            report_to=report_to,
         )
         self.trainer = Trainer(
             model=self.model,
@@ -457,21 +473,34 @@ class RoBERTaClassifier(BaseModel):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
         acc = accuracy_score(labels, preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            labels, preds, average="macro"
-        )
+        precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
+
+        per_class_metrics = {}        
+        _precision, _recall, _f1, _ = precision_recall_fscore_support(labels, preds, average=None)
+        for i, label in enumerate(np.unique(labels)):
+            per_class_metrics[f"{label}_precision"] = _precision[i]
+            per_class_metrics[f"{label}_recall"] = _recall[i]
+            per_class_metrics[f"{label}_f1"] = _f1[i]
+
         mcc = matthews_corrcoef(labels, preds)
         bal_acc = balanced_accuracy_score(labels, preds)
         kappa = cohen_kappa_score(labels, preds)
         jaccard = jaccard_score(labels, preds, average="macro")
         hamming = hamming_loss(labels, preds)
-        cr = classification_report(labels, preds, output_dict=True)
+        # cr = classification_report(labels, preds, output_dict=True)
         cm = confusion_matrix(labels, preds)
+        cm_dict = {
+            f"cm_{i}{j}": cm[i, j]
+            for i in range(cm.shape[0])
+            for j in range(cm.shape[1])
+        }
+
         try:
             auc_roc = roc_auc_score(labels, preds, multi_class="ovr")
             auc_pr = average_precision_score(labels, preds)
         except ValueError:
             auc_roc, auc_pr = None, None
+
         return {
             "accuracy": acc,
             "precision": precision,
@@ -482,8 +511,7 @@ class RoBERTaClassifier(BaseModel):
             "cohen_kappa": kappa,
             "jaccard": jaccard,
             "hamming_loss": hamming,
-            "auc_roc": auc_roc if auc_roc is not None else -1,
-            "auc_pr": auc_pr if auc_pr is not None else -1,
-            "confusion_matrix": cm.tolist(),
-            "classification_report": cr,
-        }
+            "auc_roc": auc_roc,
+            "auc_pr": auc_pr,
+            # "classification_report": cr,
+        } | per_class_metrics | cm_dict
