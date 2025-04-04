@@ -43,7 +43,6 @@ fiance	fiancee
 fiancé	fiancée
 fiances	fiancees
 fiancés	fiancées
-housewifely	butch
 bloke	girl
 blokes	girls
 dude	girlie
