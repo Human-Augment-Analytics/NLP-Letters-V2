@@ -1,0 +1,11 @@
+# Ignore all files
+*
+
+# But don't ignore directories
+!*/
+
+# Keep this file
+!.gitignore
+
+# Keep placeholder files
+!.gitkeep
